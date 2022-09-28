@@ -1,0 +1,116 @@
+steps:
+  - id: 'install-packages'
+    name: 'gcr.io/cloud-builders/npm'
+    waitFor: ['-']
+    entrypoint: 'bash'
+    args: 
+      - '-c'
+      - |
+        cd ./src
+        npm install
+
+  - id: 'audit-packages'
+    name: 'gcr.io/cloud-builders/npm'
+    waitFor: ['install-packages']
+    entrypoint: 'bash'
+    args: 
+      - '-c'
+      - |
+        cd ./src
+        npm audit
+
+  - id: 'run-sonar-scanner'
+    name: '${_ARTIFACT_REG}/$PROJECT_ID/docker/sonar-scanner:latest'
+    waitFor: ['audit-packages']
+    secretEnv: ['SONAR_HOST','SONAR_ORG','SONAR_PROJ','SONAR_TOK']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        sonar-scanner \
+        -Dsonar.host.url=$$SONAR_HOST \
+        -Dsonar.organization=$$SONAR_ORG \
+        -Dsonar.projectKey=$$SONAR_PROJ \
+        -Dsonar.login=$$SONAR_TOK \
+        -Dsonar.sources=.
+
+  - id: 'run-test'
+    name: 'gcr.io/cloud-builders/npm'
+    waitFor: ['run-sonar-scanner']
+    entrypoint: 'bash'
+    args: 
+      - '-c'
+      - |
+        cd ./src
+        npm test
+
+  - id: 'run-coverage'
+    name: 'gcr.io/cloud-builders/npm'
+    waitFor: ['run-test']
+    entrypoint: 'bash'
+    args: 
+      - '-c'
+      - |
+        cd ./src
+        npm run coverage
+
+  - id: 'copy-coverage-report-to-gcs'
+    name: 'gcr.io/cloud-builders/gcloud'
+    waitFor: ['run-coverage']
+    entrypoint: 'bash'
+    args: 
+      - '-c'
+      - |
+        gsutil cp coverage/coverage-final.json gs://${GCS_BUCKET}/${_REPO_NAME}_coverage.json
+
+  - id: 'run-snyk'
+    name: 'snyk/snyk-cli:npm'
+    waitFor: 'run-test'
+    secretEnv: ['SNYK_TOK']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pwd
+        ls -ltr
+        npm install snyk-to-html -g
+        snyk config set api=$$SNYK_TOK
+        snyk test --file=package.json --package-manager=npm --severity-threshold=medium --json-file-output=${_REPO_NAME}-snyk-report.json
+        snyk-to-html -i ${_REPO_NAME}-snyk-report.json -o ${_REPO_NAME}-snyk-report.html
+
+        # snyk code test src --json-file-output=${_REPO_NAME}-code-test-snyk-report.json
+        # snyk-to-html -i ${_REPO_NAME}-code-test-snyk-report.json -o ${_REPO_NAME}-code-test-snyk-report.html
+
+  - id: 'copy-snyk-report-to-gcs'
+    name: 'gcr.io/cloud-builders/gcloud'
+    waitFor: ['run-snyk']
+    entrypoint: 'bash'
+    args: 
+      - '-c'
+      - |
+        pwd
+        ls -ltr
+        gsutil cp ${_REPO_NAME}-snyk-report.json gs://${GCS_BUCKET}
+        gsutil cp ${_REPO_NAME}-snyk-report.html gs://${GCS_BUCKET}
+
+        # gsutil cp ${_REPO_NAME}-code-test-snyk-report.html gs://${GCS_BUCKET}
+        # gsutil cp -r ${_REPO_NAME}_coverage gs://${GCS_BUCKET}
+substitutions:
+    _SERVICE_NAME: 'security-scans'
+    _ARTIFACT_REG: 'europe-west2-docker.pkg.dev'
+    GCS_BUCKET: 'your_bucket_name'
+
+availableSecrets:
+  secretManager:
+  - versionName: projects/$PROJECT_ID/secrets/sonar-host/versions/latest
+    env: 'SONAR_HOST'
+  - versionName: projects/$PROJECT_ID/secrets/sonar-org/versions/latest
+    env: 'SONAR_ORG'
+  - versionName: projects/$PROJECT_ID/secrets/sonar-proj/versions/latest
+    env: 'SONAR_PROJ'
+  - versionName: projects/$PROJECT_ID/secrets/sonar-tok/versions/latest
+    env: 'SONAR_TOK'
+  - versionName: projects/$PROJECT_ID/secrets/snyk-tok/versions/latest
+    env: 'SNYK_TOK'
+    
+tags: ['${_SERVICE_NAME}','${_REPO_NAME}']

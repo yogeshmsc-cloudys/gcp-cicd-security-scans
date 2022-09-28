@@ -1,0 +1,15 @@
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    id: 'push-image'
+    entrypoint: 'bash'
+    waitFor: ['-']
+    args: 
+      - '-c'
+      - |
+        docker build -t $_ARTIFACT_REG/$PROJECT_ID/docker/${_SERVICE_NAME}:latest .
+        docker push $_ARTIFACT_REG/$PROJECT_ID/docker/${_SERVICE_NAME}:latest
+substitutions:
+  _SERVICE_NAME: security-scans
+  _ARTIFACT_REG: 'europe-west2-docker.pkg.dev'
+timeout: '3600s'
+tags: ['build', '${_SERVICE_NAME}']
