@@ -30,6 +30,9 @@ Enable Google Cloud Build for your repository.
 
 Setup build triggger under Google Cloud Project under Cloud Build for the repository.
 
+## Tokens & Secrets
+Maintain Tokens and secrets in Google Cloud Secret Manager. Refer cloudbuild.yaml
+
 ## Command
 Clone the Repo and run the below command on GCP Cloud shell.
 
